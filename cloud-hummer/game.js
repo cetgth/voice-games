@@ -401,7 +401,14 @@ function update(dt){
     for(const s of world.terrain[i]){
       if(s === p.rideSeg) continue;   // 타고 있는 구름은 나를 태운 채 화면에 고정 — 배경만 흘러간다
       s.x -= dx;
-      if(!s.ridden && s.x < p.x - s.w/2) s.x = p.x - s.w/2;   // 다음 구름은 내 앞에서 멈춰 기다린다 — 놓쳐도 재도전
+      if(!s.ridden){
+        const parkX = p.x + 70;       // 다음 구름은 내 앞에서 멈춰 기다린다 — 놓쳐도 재도전
+        if(s.level === p.level){
+          if(s.x > p.x - s.w/2) s.x = Math.max(p.x - s.w/2, s.x - 900*dt);  // 음이 맞으면 발밑으로 스르륵
+        }else if(s.x < parkX){
+          s.x = Math.min(parkX, s.x + 500*dt);   // 음이 틀리면 앞자리로 물러나 기다린다
+        }
+      }
     }
     world.terrain[i] = world.terrain[i].filter(s => s.x + s.w > -80);
     ensureTerrain(i);
