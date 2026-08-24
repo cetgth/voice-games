@@ -355,7 +355,8 @@ function update(dt){
       if(dir !== 0){
         v.ref = v.note;
         const nxt = world.terrain[i].filter(s=>!s.ridden && s!==p.rideSeg).sort((a,b)=>a.x-b.x)[0];
-        if(nxt && Math.sign(nxt.level - p.level) === dir) hop(p, nxt.level - p.level);
+        // 다음 구름이 사정거리 안일 때만 도약 — 너무 일찍 뛰어서 공중에 오래 떠 있는 것 방지
+        if(nxt && nxt.x < p.x + 240 && Math.sign(nxt.level - p.level) === dir) hop(p, nxt.level - p.level);
       }
     }
     p.x = W*0.28;
@@ -533,7 +534,8 @@ function draw(){
     if(nxt){
       const diff = nxt.level - p.level;
       if(diff !== 0){
-        ctx.globalAlpha = 0.7 + 0.3*Math.sin(tNow*6);
+        const ready = nxt.x < p.x + 240;   // 사정거리 안 = 지금 도약 가능 → 밝게 깜빡임
+        ctx.globalAlpha = ready ? 0.7 + 0.3*Math.sin(tNow*6) : 0.25;
         ctx.fillStyle = '#ffd166'; ctx.font = 'bold 18px sans-serif';
         ctx.textAlign='center'; ctx.textBaseline='middle';
         const sym = diff > 0 ? '↑' : '↓';
