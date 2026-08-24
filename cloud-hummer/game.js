@@ -6,8 +6,7 @@ const CFG = {
   voiceHold: 0.25,    // 소리가 잠깐 끊겨도 이 시간(초)만큼은 유지로 간주
   smoothing: 0.35,    // 음정 스무딩 (0~1, 클수록 즉각 반응)
   levels: 5,          // 구름 층 수
-  hopSemis: 2,        // 이만큼(반음) 음이 변하면 도약 발동
-  semisPerLevel: 3.5, // 도약 폭 — 이 간격(반음)마다 한 칸씩 (도→미=1칸, 도→솔=2칸, 옥타브=3칸)
+  hopSemis: 2,        // 기준음보다 이만큼(반음) 높거나 낮게 내면 한 칸 이동 — 방향만 판정, 폭은 상관없음
   refHold: 0.45,      // 이 시간(초) 안에 이어 낸 음만 직전 음과 비교해 도약 — 더 쉬고 내면 첫음은 기준음일 뿐
   coast: 2.5,         // 허밍을 멈춰도 이 시정수(초)로 관성 활강 — 톡톡 끊어 불러도 OK
   cloudFresh: 7,      // 같은 구름을 오래 타면 이 시간(초)에 걸쳐 지쳐서 느려짐 — 갈아타면 다시 쌩쌩
@@ -154,6 +153,7 @@ function consonant(f1, f2){
 
 // ===================== 게임 상태 =====================
 let state='menu', mode='solo', players=[], world=null, calib=null, tNow=0;
+let DBG = location.hash === '#debug';   // 주소 끝에 #debug 붙이거나 D 키로 토글
 const overrides=[null,null];
 const pointerIds = new Map();
 
@@ -348,14 +348,11 @@ function update(dt){
   players.forEach((p,i)=>{
     const lane = ls[i];
     const v = p.voice;
-    if(!overrides[i] && v.active && v.ref !== null){
-      // 프레이즈 시작음 대비 얼마나 올렸/내렸나가 그대로 층 오프셋이 된다 (내리면 되돌아옴)
-      if(p.phraseId !== v.phraseId){ p.phraseId = v.phraseId; p.gestureBase = p.level; }
+    if(!overrides[i] && v.active && v.ref !== null && v.rms > CFG.rmsGate*1.5){
+      // 방향만 판정: 기준음보다 높으면 한 칸 위로, 낮으면 한 칸 아래로 (이동 후 기준음 재설정)
       const semis = v.note - v.ref;
-      let target = p.gestureBase;
-      if(Math.abs(semis) >= CFG.hopSemis)
-        target = clamp(p.gestureBase + Math.sign(semis)*Math.max(1, Math.round(Math.abs(semis)/CFG.semisPerLevel)), 0, CFG.levels-1);
-      if(target !== p.level) hop(p, target - p.level);
+      if(semis >= CFG.hopSemis){ hop(p, 1); v.ref = v.note; }
+      else if(semis <= -CFG.hopSemis){ hop(p, -1); v.ref = v.note; }
     }
     p.x = W*0.28;
     const seg = segAt(i, p.x, p.level);
@@ -570,21 +567,25 @@ function draw(){
       ctx.textAlign='center'; ctx.textBaseline='alphabetic';
       ctx.fillText(noteName(p.voice.freq), p.x, p.y-30);
     }
-    // 피치 사다리: 금색 점(내 음의 변화량)을 초록 칸(다음 구름 높이)까지 밀면 도약
+    // 방향 게이지: 금색 점을 초록 칸(위/아래)에 닿게 음을 높이거나 낮추면 한 칸 이동
     if(p.ctrlActive && p.voice.ref !== null){
-      const gx = p.x + 32, step = 26;
+      const gx = p.x + 32, step = 30;
       ctx.strokeStyle = '#ffffff26'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(gx, p.y - step*2.3); ctx.lineTo(gx, p.y + step*2.3); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(gx, p.y - step*1.25); ctx.lineTo(gx, p.y + step*1.25); ctx.stroke();
       ctx.lineWidth = 1; ctx.strokeStyle = '#ffffff40';
-      for(let L=-2; L<=2; L++){
+      for(let L=-1; L<=1; L++){
         ctx.beginPath(); ctx.moveTo(gx-5, p.y - L*step); ctx.lineTo(gx+5, p.y - L*step); ctx.stroke();
       }
-      const tgt = clamp(p.nextDiff, -2, 2);
-      if(tgt !== 0){
+      const td = Math.sign(p.nextDiff || 0);
+      if(td !== 0){
         ctx.fillStyle = 'rgba(120,220,140,0.55)';
-        ctx.fillRect(gx-7, p.y - tgt*step - 7, 14, 14);
+        ctx.fillRect(gx-7, p.y - td*step - 7, 14, 14);
+        if(Math.abs(p.nextDiff) > 1){
+          ctx.fillStyle = '#9fe8ae'; ctx.font='bold 11px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
+          ctx.fillText('×'+Math.abs(p.nextDiff), gx+10, p.y - td*step);
+        }
       }
-      const dl = clamp((p.voice.note - p.voice.ref)/CFG.semisPerLevel, -2.3, 2.3);
+      const dl = clamp((p.voice.note - p.voice.ref)/CFG.hopSemis, -1.15, 1.15);
       ctx.fillStyle = '#ffd166';
       ctx.beginPath(); ctx.arc(gx, p.y - dl*step, 5, 0, 6.29); ctx.fill();
     }
@@ -610,12 +611,25 @@ function draw(){
     ctx.globalAlpha = clamp((7-world.t)/1.5, 0, 1)*0.8;
     ctx.fillStyle='#fff'; ctx.font='18px sans-serif'; ctx.textAlign='center';
     const hint = mode==='solo'
-      ? '🎵 캐릭터 옆 금색 점을 초록 칸까지! 그만큼 음을 올리거나 내리면 도약해서 갈아타요'
-      : '🎵 금색 점을 초록 칸까지 음으로 밀기! 각자 갈아타기 · 화음 = 게이지 ✨';
+      ? '🎵 방향만 맞추면 돼요! 내던 음보다 높게 = ↑ 한 칸 · 낮게 = ↓ 한 칸 (↑↑면 두 번)'
+      : '🎵 각자 음을 높게/낮게 내서 한 칸씩! 화음 = 게이지 ✨';
     ctx.fillText(hint, W/2, H-16);
     ctx.globalAlpha = 1;
   }
 
+  if(DBG){
+    ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(8, H-24-players.length*15, 360, 10+players.length*15);
+    ctx.fillStyle='#7CFC90'; ctx.font='12px monospace'; ctx.textAlign='left'; ctx.textBaseline='top';
+    players.forEach((p,i)=>{
+      const v = p.voice;
+      ctx.fillText((players.length>1 ? (i+1)+'P ' : '')
+        + 'note:' + (v.freq>0 ? v.note.toFixed(1) : '--')
+        + ' ref:' + (v.ref!=null ? v.ref.toFixed(1) : '--')
+        + ' d:'  + (v.ref!=null && v.freq>0 ? (v.note-v.ref).toFixed(1) : '--')
+        + ' lv:' + p.level + ' ride:' + (p.riding?'O':'X')
+        + ' rms:' + v.rms.toFixed(3), 14, H-18-(players.length-i)*15);
+    });
+  }
   if(world.flash > 0){
     ctx.globalAlpha = world.flash*0.5;
     ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
@@ -648,6 +662,7 @@ addEventListener('pointerup', endPointer);
 addEventListener('pointercancel', endPointer);
 addEventListener('keydown', e=>{
   if(e.key==='Escape') goMenu();
+  if(e.key==='d' || e.key==='D') DBG = !DBG;
 });
 
 // ===================== 캐릭터 선택 =====================
