@@ -2,7 +2,7 @@
 
 // ===================== 튜닝 상수 =====================
 const CFG = {
-  rmsGate: 0.012,     // 이보다 작은 소리는 무시 (마이크가 너무 예민하면 올리세요)
+  rmsGate: 0.005,     // 이보다 작은 소리는 무시 (주변 소음에 오작동하면 올리세요)
   voiceHold: 0.25,    // 소리가 잠깐 끊겨도 이 시간(초)만큼은 유지로 간주
   smoothing: 0.35,    // 음정 스무딩 (0~1, 클수록 즉각 반응)
   levels: 5,          // 구름 층 수
@@ -44,7 +44,7 @@ async function initAudio(){
   if(audio.ready) return true;
   try{
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false }
+      audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:true }  // AGC 켜서 멀리서도 인식
     });
     const ac = new (window.AudioContext||window.webkitAudioContext)();
     await ac.resume();
@@ -349,10 +349,14 @@ function update(dt){
     const lane = ls[i];
     const v = p.voice;
     if(!overrides[i] && v.active && v.ref !== null && v.rms > CFG.rmsGate*1.5){
-      // 방향만 판정: 기준음보다 높으면 한 칸 위로, 낮으면 한 칸 아래로 (이동 후 기준음 재설정)
+      // 방향만 맞으면 무조건 성공: 올리면 위 구름으로, 내리면 아래 구름으로 — 폭·칸수 무관하게 바로 도약
       const semis = v.note - v.ref;
-      if(semis >= CFG.hopSemis){ hop(p, 1); v.ref = v.note; }
-      else if(semis <= -CFG.hopSemis){ hop(p, -1); v.ref = v.note; }
+      const dir = semis >= CFG.hopSemis ? 1 : (semis <= -CFG.hopSemis ? -1 : 0);
+      if(dir !== 0){
+        v.ref = v.note;
+        const nxt = world.terrain[i].filter(s=>!s.ridden && s!==p.rideSeg).sort((a,b)=>a.x-b.x)[0];
+        if(nxt && Math.sign(nxt.level - p.level) === dir) hop(p, nxt.level - p.level);
+      }
     }
     p.x = W*0.28;
     const seg = segAt(i, p.x, p.level);
@@ -532,7 +536,7 @@ function draw(){
         ctx.globalAlpha = 0.7 + 0.3*Math.sin(tNow*6);
         ctx.fillStyle = '#ffd166'; ctx.font = 'bold 18px sans-serif';
         ctx.textAlign='center'; ctx.textBaseline='middle';
-        const sym = diff > 0 ? '↑'.repeat(Math.min(diff,3)) : '↓'.repeat(Math.min(-diff,3));
+        const sym = diff > 0 ? '↑' : '↓';
         ctx.fillText(sym, nxt.x + nxt.w/2, levelY(lane, nxt.level) - 28);
         ctx.globalAlpha = 1;
       }
@@ -580,10 +584,6 @@ function draw(){
       if(td !== 0){
         ctx.fillStyle = 'rgba(120,220,140,0.55)';
         ctx.fillRect(gx-7, p.y - td*step - 7, 14, 14);
-        if(Math.abs(p.nextDiff) > 1){
-          ctx.fillStyle = '#9fe8ae'; ctx.font='bold 11px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
-          ctx.fillText('×'+Math.abs(p.nextDiff), gx+10, p.y - td*step);
-        }
       }
       const dl = clamp((p.voice.note - p.voice.ref)/CFG.hopSemis, -1.15, 1.15);
       ctx.fillStyle = '#ffd166';
@@ -611,8 +611,8 @@ function draw(){
     ctx.globalAlpha = clamp((7-world.t)/1.5, 0, 1)*0.8;
     ctx.fillStyle='#fff'; ctx.font='18px sans-serif'; ctx.textAlign='center';
     const hint = mode==='solo'
-      ? '🎵 방향만 맞추면 돼요! 내던 음보다 높게 = ↑ 한 칸 · 낮게 = ↓ 한 칸 (↑↑면 두 번)'
-      : '🎵 각자 음을 높게/낮게 내서 한 칸씩! 화음 = 게이지 ✨';
+      ? '🎵 화살표 방향으로 음만 바꾸면 성공! ↑면 높게, ↓면 낮게 — 폭은 상관없어요'
+      : '🎵 화살표 방향으로 음만 바꾸면 갈아타요! 화음 = 게이지 ✨';
     ctx.fillText(hint, W/2, H-16);
     ctx.globalAlpha = 1;
   }
