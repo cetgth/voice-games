@@ -292,9 +292,11 @@ function ensureTerrain(i){
   const p = players[i];
   const px = p ? p.x : W*0.26;
   let active = T.reduce((n,s)=>{
-    const ahead = s.x > px;
-    const under = s.x <= px && s.x + s.w > px;
-    return n + ((ahead || (under && (!p || p.rideSeg === s || p.rideSeg == null))) ? 1 : 0);
+    if(s.x + s.w <= px - 20) return n;                     // 이미 지나간 구름
+    if(p && s === p.rideSeg) return n + 1;                 // 타는 중
+    if(!s.ridden) return n + 1;                            // 아직 안 탄 구름(다음/대기 중)
+    if(p && p.rideSeg == null && s.x <= px) return n + 1;  // 시작 직후 발밑 구름
+    return n;
   }, 0);
   while(active < 2){
     const last = T.length ? T[T.length-1] : null;
@@ -390,6 +392,7 @@ function update(dt){
     for(const s of world.terrain[i]){
       if(s === p.rideSeg) continue;   // 타고 있는 구름은 나를 태운 채 화면에 고정 — 배경만 흘러간다
       s.x -= dx;
+      if(!s.ridden && s.x < p.x - s.w/2) s.x = p.x - s.w/2;   // 다음 구름은 내 앞에서 멈춰 기다린다 — 놓쳐도 재도전
     }
     world.terrain[i] = world.terrain[i].filter(s => s.x + s.w > -80);
     ensureTerrain(i);
@@ -503,15 +506,17 @@ function draw(){
       drawCloud(effX, y, effW);
       ctx.globalAlpha = 1;
     }
-    // 다음 구름의 상대 높이 안내 화살표
-    const nxt = world.terrain[i].filter(s=>s.x > p.x + p.r).sort((a,b)=>a.x-b.x)[0];
+    // 다음(대기 중) 구름의 상대 높이 안내 화살표 — 깜빡이며 목표를 알려준다
+    const nxt = world.terrain[i].filter(s=>!s.ridden && s!==p.rideSeg).sort((a,b)=>a.x-b.x)[0];
     if(nxt){
       const diff = nxt.level - p.level;
       if(diff !== 0){
+        ctx.globalAlpha = 0.7 + 0.3*Math.sin(tNow*6);
         ctx.fillStyle = '#ffd166'; ctx.font = 'bold 18px sans-serif';
         ctx.textAlign='center'; ctx.textBaseline='middle';
         const sym = diff > 0 ? '↑'.repeat(Math.min(diff,3)) : '↓'.repeat(Math.min(-diff,3));
         ctx.fillText(sym, nxt.x + nxt.w/2, levelY(lane, nxt.level) - 28);
+        ctx.globalAlpha = 1;
       }
     }
   });
@@ -575,8 +580,8 @@ function draw(){
     ctx.globalAlpha = clamp((7-world.t)/1.5, 0, 1)*0.8;
     ctx.fillStyle='#fff'; ctx.font='18px sans-serif'; ctx.textAlign='center';
     const hint = mode==='solo'
-      ? '🎵 0.75초마다 다음 구름이 와요! ↑↓만큼 음을 도약해서 바로바로 갈아타기 (끊어 불러도 OK)'
-      : '🎵 둘이 각자 리듬 타며 갈아타기! ↑↓만큼 음 도약 · 화음 = 게이지 ✨';
+      ? '🎵 다음 구름이 앞에서 기다려요! ↑↓만큼 음을 도약해서 갈아타기 — 몇 번이든 재도전 OK'
+      : '🎵 다음 구름이 기다려요! 각자 ↑↓만큼 음 도약해 갈아타기 · 화음 = 게이지 ✨';
     ctx.fillText(hint, W/2, H-16);
     ctx.globalAlpha = 1;
   }
