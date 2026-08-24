@@ -11,6 +11,7 @@ const CFG = {
   refHold: 1.2,       // 숨 쉬느라 끊겨도 이 시간(초) 안에 다시 내면 직전 음과 비교해 도약 판정
   coast: 2.5,         // 허밍을 멈춰도 이 시정수(초)로 관성 활강 — 톡톡 끊어 불러도 OK
   cloudFresh: 7,      // 같은 구름을 오래 타면 이 시간(초)에 걸쳐 지쳐서 느려짐 — 갈아타면 다시 쌩쌩
+  hopEvery: 0.75,     // 다음 구름이 도착하는 간격(초) — 이 리듬으로 계속 갈아탄다
   startSpeed: 240, maxSpeed: 560,   // 속도는 거리에 비례해 서서히 상승
   harmonyCents: 40,   // 화음 판정 허용 오차(센트, 반음=100)
   harmonyFill: 30, harmonyDrain: 14, // 하모니 게이지 초당 증감
@@ -274,21 +275,32 @@ function pickNextLevel(i){
   world.lastLevel[i] = lv;
   return lv;
 }
-// x 지점 밑에 깔린 계단 세그먼트
-function segAt(i, x){
-  for(const s of world.terrain[i]) if(x >= s.x && x < s.x + s.w) return s;
-  return null;
+// x 지점 밑에 깔린 구름 — 내 높이와 맞는 구름을 우선해서, 옛 구름이 겹쳐 있어도 바로 갈아타진다
+function segAt(i, x, level){
+  let hit = null;
+  for(const s of world.terrain[i]){
+    if(x >= s.x && x < s.x + s.w){
+      if(s.level === level) return s;
+      if(!hit) hit = s;
+    }
+  }
+  return hit;
 }
-// 항상 [타는 구름 + 다음 구름 하나]만 활성으로 유지 — 다음 구름은 앞쪽에서 뭉게뭉게 생겨난다
+// 항상 [타는 구름 + 다음 구름 하나]만 활성으로 유지 — 다음 구름은 hopEvery 초 뒤에 도착하도록 깔린다
 function ensureTerrain(i){
   const T = world.terrain[i];
-  const px = players[i] ? players[i].x : W*0.26;
-  let active = T.reduce((n,s)=>n+(s.x + s.w > px - 20 ? 1 : 0), 0);
+  const p = players[i];
+  const px = p ? p.x : W*0.26;
+  let active = T.reduce((n,s)=>{
+    const ahead = s.x > px;
+    const under = s.x <= px && s.x + s.w > px;
+    return n + ((ahead || (under && (!p || p.rideSeg === s || p.rideSeg == null))) ? 1 : 0);
+  }, 0);
   while(active < 2){
     const last = T.length ? T[T.length-1] : null;
-    const w = clamp(200 - world.dist*0.004, 120, 200) + Math.random()*70;
-    const x = Math.max(px + 380 + Math.random()*220, last ? last.x + last.w + 80 : 0);
-    T.push({x, w, level: pickNextLevel(i), passed:false, ridden:false, born:tNow});
+    const w = 130 + Math.random()*50;
+    const x = Math.max(px + world.speed*CFG.hopEvery, last ? last.x + last.w + 10 : 0);
+    T.push({x, w, level: pickNextLevel(i), ridden:false, born:tNow});
     active++;
   }
 }
@@ -332,7 +344,7 @@ function update(dt){
       }
     }
     p.x = W*0.28;
-    const seg = segAt(i, p.x);
+    const seg = segAt(i, p.x, p.level);
     p.riding = !!(seg && seg.level === p.level);   // 발밑 구름과 높이가 맞으면 탑승 중
     if(p.riding){
       p.airT = 0;
@@ -366,7 +378,7 @@ function update(dt){
   // 같은 구름을 오래 타면 구름이 지쳐 느려지고(갈아타면 회복), 공중에 오래 떠 있어도 느려진다
   const rideAvg = players.reduce((a,p)=>{
     if(p.riding) return a + Math.max(0.35, 1 - 0.65*p.rideT/CFG.cloudFresh);
-    return a + Math.max(0.25, 1 - 1.2*p.airT);
+    return a + Math.max(0.4, 1 - 0.8*p.airT);
   },0)/players.length;
 
   // --- 전진: 구름을 타고 있을 때 온전한 속도, 공중에선 점점 느려짐 ---
@@ -563,8 +575,8 @@ function draw(){
     ctx.globalAlpha = clamp((7-world.t)/1.5, 0, 1)*0.8;
     ctx.fillStyle='#fff'; ctx.font='18px sans-serif'; ctx.textAlign='center';
     const hint = mode==='solo'
-      ? '🎵 톡톡 허밍하면 관성으로 쭉! 도→미처럼 끊어 불러도 도약돼요 · ↑↓만큼 도약해 갈아타기'
-      : '🎵 둘이 톡톡 허밍! 구름이 지치기 전에 ↑↓만큼 도약해 갈아타기 · 화음 = 게이지 ✨';
+      ? '🎵 0.75초마다 다음 구름이 와요! ↑↓만큼 음을 도약해서 바로바로 갈아타기 (끊어 불러도 OK)'
+      : '🎵 둘이 각자 리듬 타며 갈아타기! ↑↓만큼 음 도약 · 화음 = 게이지 ✨';
     ctx.fillText(hint, W/2, H-16);
     ctx.globalAlpha = 1;
   }
