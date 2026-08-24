@@ -166,7 +166,7 @@ function buildPlayers(){
   for(const p of players){
     p.voice=makeVoice(); p.y=0; p.prevY=0; p.vy=0; p.landT=-9; p.settled=true; p.riding=false; p.r=16; p.level=2;
     p.det=[55,1500]; p.analyser=null; p.ctrlActive=false; p.x=0; p.airT=0; p.rideT=0; p.rideSeg=null;
-    p.phraseId=-1; p.gestureBase=2; p.nextDiff=0; p.hopCd=0; p.readySeg=null; p.readyT=0; p.jumpTo=null;
+    p.phraseId=-1; p.gestureBase=2; p.nextDiff=0; p.hopCd=0; p.jumpTo=null;
   }
 }
 
@@ -250,7 +250,7 @@ function startRun(){
   players.forEach((p,i)=>{
     p.voice = makeVoice();
     p.level = 2; p.vy = 0; p.x = W*0.28; p.airT = 0; p.rideT = 0; p.riding = true; p.rideSeg = null;
-    p.phraseId = -1; p.gestureBase = 2; p.hopCd = 0; p.readySeg = null; p.readyT = 0; p.jumpTo = null;
+    p.phraseId = -1; p.gestureBase = 2; p.hopCd = 0; p.jumpTo = null;
     p.y = levelY(ls[i], p.level); p.prevY = p.y;
     world.terrain[i] = [{x: p.x-90, w: 300, level:2, ridden:true}];   // 출발 구름
     ensureTerrain(i);
@@ -354,15 +354,6 @@ function update(dt){
         p.jumpTo = null;
       }
     }
-
-    // 도약 준비 감지: 다음 구름이 사정거리에 들어오는 순간 알림 (폰 진동 + 화면 표시)
-    const nxtR = world.terrain[i].filter(s=>!s.ridden && s!==p.rideSeg).sort((a,b)=>a.x-b.x)[0];
-    if(nxtR && nxtR.x < p.x + 240 && nxtR.level !== p.level && !p.jumpTo){
-      if(p.readySeg !== nxtR){
-        p.readySeg = nxtR; p.readyT = world.t;
-        try{ if(navigator.vibrate) navigator.vibrate(50); }catch(e){}
-      }
-    } else p.readySeg = null;
 
     p.hopCd = Math.max(0, p.hopCd - dt);
     if(!overrides[i] && v.active && v.ref !== null && v.rms > CFG.rmsGate*1.5 && p.hopCd <= 0){
@@ -610,21 +601,6 @@ function draw(){
       const dl = clamp((p.voice.note - p.voice.ref)/CFG.hopSemis, -1.15, 1.15);
       ctx.fillStyle = '#ffd166';
       ctx.beginPath(); ctx.arc(gx, p.y - dl*step, 5, 0, 6.29); ctx.fill();
-    }
-    // 도약 준비 알림: 금색 링이 퍼지고 "지금 ↑/↓!" 문구가 뜬다
-    if(p.readySeg && world){
-      const rt = world.t - p.readyT;
-      if(rt < 0.8){
-        const k = clamp(rt/0.8, 0, 1);
-        ctx.globalAlpha = 1-k;
-        ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.arc(p.x, p.y, 24 + k*28, 0, 6.29); ctx.stroke();
-        ctx.globalAlpha = 1; ctx.lineWidth = 1;
-      }
-      const dirSym = p.nextDiff > 0 ? '↑' : '↓';
-      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 16px sans-serif';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText('지금 '+dirSym+'!', p.x, p.y - 46 + Math.sin(tNow*7)*2);
     }
   });
 
