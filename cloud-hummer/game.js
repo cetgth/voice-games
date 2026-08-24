@@ -166,7 +166,7 @@ function buildPlayers(){
   for(const p of players){
     p.voice=makeVoice(); p.y=0; p.prevY=0; p.vy=0; p.landT=-9; p.settled=true; p.riding=false; p.r=16; p.level=2;
     p.det=[55,1500]; p.analyser=null; p.ctrlActive=false; p.x=0; p.airT=0; p.rideT=0; p.rideSeg=null;
-    p.phraseId=-1; p.gestureBase=2; p.nextDiff=0; p.hopCd=0; p.readySeg=null; p.readyT=0;
+    p.phraseId=-1; p.gestureBase=2; p.nextDiff=0; p.hopCd=0; p.readySeg=null; p.readyT=0; p.jumpTo=null;
   }
 }
 
@@ -250,7 +250,7 @@ function startRun(){
   players.forEach((p,i)=>{
     p.voice = makeVoice();
     p.level = 2; p.vy = 0; p.x = W*0.28; p.airT = 0; p.rideT = 0; p.riding = true; p.rideSeg = null;
-    p.phraseId = -1; p.gestureBase = 2; p.hopCd = 0; p.readySeg = null; p.readyT = 0;
+    p.phraseId = -1; p.gestureBase = 2; p.hopCd = 0; p.readySeg = null; p.readyT = 0; p.jumpTo = null;
     p.y = levelY(ls[i], p.level); p.prevY = p.y;
     world.terrain[i] = [{x: p.x-90, w: 300, level:2, ridden:true}];   // 출발 구름
     ensureTerrain(i);
@@ -346,9 +346,18 @@ function update(dt){
   players.forEach((p,i)=>{
     const lane = ls[i];
     const v = p.voice;
+    // 예약된 구름이 발밑에 도착하면 그제서야 폴짝 — 허공에 뜨는 순간이 없다
+    if(p.jumpTo){
+      if(!world.terrain[i].includes(p.jumpTo)) p.jumpTo = null;
+      else if(p.jumpTo.x <= p.x - 10){
+        hop(p, p.jumpTo.level - p.level);
+        p.jumpTo = null;
+      }
+    }
+
     // 도약 준비 감지: 다음 구름이 사정거리에 들어오는 순간 알림 (폰 진동 + 화면 표시)
     const nxtR = world.terrain[i].filter(s=>!s.ridden && s!==p.rideSeg).sort((a,b)=>a.x-b.x)[0];
-    if(nxtR && nxtR.x < p.x + 240 && nxtR.level !== p.level){
+    if(nxtR && nxtR.x < p.x + 240 && nxtR.level !== p.level && !p.jumpTo){
       if(p.readySeg !== nxtR){
         p.readySeg = nxtR; p.readyT = world.t;
         try{ if(navigator.vibrate) navigator.vibrate(50); }catch(e){}
@@ -363,9 +372,9 @@ function update(dt){
       if(dir !== 0){
         v.ref = v.note;
         const nxt = world.terrain[i].filter(s=>!s.ridden && s!==p.rideSeg).sort((a,b)=>a.x-b.x)[0];
-        // 사정거리 안 + 한 번에 한 칸 + 도약 후 쿨다운(한 제스처로 두 번 뛰는 것 방지)
-        if(nxt && nxt.x < p.x + 240 && Math.sign(nxt.level - p.level) === dir){
-          hop(p, dir);
+        // 방향이 맞으면 "예약"만 — 새 구름이 발밑에 들어올 때까지 지금 구름에서 내리지 않는다
+        if(nxt && nxt.x < p.x + 240 && Math.sign(nxt.level - p.level) === dir && !p.jumpTo){
+          p.jumpTo = nxt;
           p.hopCd = CFG.hopCooldown;
         }
       }
@@ -419,11 +428,11 @@ function update(dt){
       if(s === p.rideSeg) continue;   // 타고 있는 구름은 나를 태운 채 화면에 고정 — 배경만 흘러간다
       s.x -= dx;
       if(!s.ridden){
-        const parkX = p.x + 70;       // 다음 구름은 내 앞에서 멈춰 기다린다 — 놓쳐도 재도전
-        if(s.level === p.level){
-          if(s.x > p.x - s.w/2) s.x = Math.max(p.x - s.w/2, s.x - 900*dt);  // 음이 맞으면 발밑으로 스르륵
-        }else if(s.x < parkX){
-          s.x = Math.min(parkX, s.x + 500*dt);   // 음이 틀리면 앞자리로 물러나 기다린다
+        if(s === p.jumpTo || s.level === p.level){
+          // 예약됐거나 내 높이와 같은 구름은 발밑으로 스르륵 들어온다
+          if(s.x > p.x - s.w/2) s.x = Math.max(p.x - s.w/2, s.x - 900*dt);
+        }else if(s.x < p.x + 70){
+          s.x = Math.min(p.x + 70, s.x + 500*dt);   // 그 외에는 앞자리에서 대기 — 놓쳐도 재도전
         }
       }
     }
