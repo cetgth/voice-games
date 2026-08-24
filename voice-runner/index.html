@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>듀엣 러너</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0b1026;font-family:'Segoe UI',system-ui,sans-serif;color:#fff}
+  #game{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
+  .screen{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:rgba(8,10,30,.78);backdrop-filter:blur(6px);text-align:center;padding:24px;z-index:10}
+  .hidden{display:none!important}
+  h1{font-size:44px;margin:0;letter-spacing:2px}
+  h2{font-size:30px;margin:0}
+  .sub{opacity:.85;max-width:600px;line-height:1.7;margin:0}
+  button{font-size:20px;padding:14px 34px;border:none;border-radius:14px;cursor:pointer;background:#ffd166;color:#22223b;font-weight:700;transition:transform .1s}
+  button.alt{background:#4ecdc4}
+  button:hover{transform:translateY(-2px)}
+  .big{font-size:64px;font-weight:800;color:#ffd166}
+  .note-live{font-size:38px;font-weight:700;color:#ffd166;min-height:52px}
+  .bar{width:320px;height:10px;background:#ffffff22;border-radius:5px;overflow:hidden}
+  .bar>i{display:block;height:100%;width:0;background:#4ecdc4;border-radius:5px;transition:width .1s}
+  .tip{font-size:14px;opacity:.6;margin:0}
+  .iconbtn{position:absolute;top:10px;left:10px;z-index:5;background:#ffffff22;color:#fff;font-size:20px;padding:8px 14px;border-radius:12px}
+  .cp-row{display:flex;align-items:center;gap:10px;justify-content:center}
+  .cp-label{opacity:.7;width:26px;text-align:right;font-weight:700}
+  .cp-list{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+  .cp-btn{font-size:24px;line-height:1;padding:7px 10px;border-radius:10px;background:#ffffff14;border:2px solid transparent}
+  .cp-btn.sel{border-color:#ffd166;background:#ffd16633}
+  .cp-name{width:92px;background:#ffffff14;border:2px solid #ffffff22;border-radius:10px;color:#fff;padding:8px 10px;font-size:15px;font-family:inherit}
+  .cp-name:focus{outline:none;border-color:#4ecdc4}
+  .cp-name::placeholder{color:#ffffff55}
+  button.ghost{background:#ffffff22;color:#fff;font-size:16px;padding:10px 22px}
+  .rank-list{display:flex;flex-direction:column;gap:6px;width:min(480px,86vw);max-height:50vh;overflow-y:auto}
+  .rank-row{display:flex;gap:12px;align-items:baseline;background:#ffffff10;border-radius:10px;padding:8px 14px;font-size:16px;text-align:left}
+  .rank-row .rk{width:24px;text-align:right;opacity:.7;font-weight:700}
+  .rank-row.top .rk{color:#ffd166;opacity:1}
+  .rank-row .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rank-row .md{font-size:12px;opacity:.6}
+  .rank-row .sc{font-weight:700;color:#ffd166;font-variant-numeric:tabular-nums}
+  .rank-row .dt{font-size:12px;opacity:.5}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="menu" class="screen">
+  <h1>🎤 듀엣 러너</h1>
+  <p class="sub">목소리 높낮이로 캐릭터를 조종하세요!<br>
+  <b>소리를 내는 동안만 달려요 (침묵 = 정지) · 높은 소리 = 점프 · 낮은 소리 = 웅크리기</b><br>
+  부딪혀도 죽지 않아요 — 장애물에 걸려서 못 갈 뿐! 음을 바꿔서 빠져나가세요<br><br>
+  듀엣 모드는 두 사람이 마이크 하나로 — 저음 담당(1P)과 고음 담당(2P)이<br>
+  각자 캐릭터를 조종하고, 두 목소리가 <b>화음</b>을 이루면<br>
+  하모니 게이지가 차올라 화면의 장애물을 전부 쓸어버립니다 ✨</p>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div class="cp-row"><span class="cp-label">1P</span><input id="name0" class="cp-name" maxlength="8" placeholder="이름"><div id="pick0" class="cp-list"></div></div>
+    <div class="cp-row"><span class="cp-label">2P</span><input id="name1" class="cp-name" maxlength="8" placeholder="이름"><div id="pick1" class="cp-list"></div></div>
+  </div>
+  <div style="display:flex;gap:16px">
+    <button id="btnSolo">솔로</button>
+    <button id="btnDuet" class="alt">듀엣</button>
+    <button id="btnRank" class="ghost">🏆 랭킹</button>
+  </div>
+  <p class="tip">마이크 권한을 허용해 주세요 · 목이 아프면 마우스 드래그로도 조작됩니다(치트)</p>
+</div>
+
+<div id="calib" class="screen hidden">
+  <h2 id="calibTitle"></h2>
+  <p id="calibDesc" class="sub"></p>
+  <div class="note-live" id="calibNote">—</div>
+  <div class="bar"><i id="calibBar"></i></div>
+  <p class="tip">소리를 2초 정도 유지하면 자동으로 다음 단계로 넘어가요 · 허밍이나 휘파람도 OK</p>
+</div>
+
+<div id="rank" class="screen hidden">
+  <h2>🏆 랭킹</h2>
+  <p class="tip">한 판 달리고 🏠 버튼으로 나오면 점수가 기록돼요 (이 기기 기준)</p>
+  <div id="rankList" class="rank-list"></div>
+  <button id="btnRankClose" class="alt">닫기</button>
+</div>
+
+<button id="btnHome" class="iconbtn hidden" aria-label="메뉴로">🏠</button>
+
+<script src="game.js"></script>
+</body>
+</html>

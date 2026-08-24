@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>허밍 클라우드</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0b1026;font-family:'Segoe UI',system-ui,sans-serif;color:#fff}
+  #game{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
+  .screen{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:rgba(8,10,30,.78);backdrop-filter:blur(6px);text-align:center;padding:24px;z-index:10}
+  .hidden{display:none!important}
+  h1{font-size:44px;margin:0;letter-spacing:2px}
+  h2{font-size:30px;margin:0}
+  .sub{opacity:.85;max-width:620px;line-height:1.7;margin:0}
+  button{font-size:20px;padding:14px 34px;border:none;border-radius:14px;cursor:pointer;background:#ffd166;color:#22223b;font-weight:700;transition:transform .1s}
+  button.alt{background:#4ecdc4}
+  button:hover{transform:translateY(-2px)}
+  .note-live{font-size:38px;font-weight:700;color:#ffd166;min-height:52px}
+  .bar{width:320px;height:10px;background:#ffffff22;border-radius:5px;overflow:hidden}
+  .bar>i{display:block;height:100%;width:0;background:#4ecdc4;border-radius:5px;transition:width .1s}
+  .tip{font-size:14px;opacity:.6;margin:0}
+  .iconbtn{position:absolute;top:10px;left:10px;z-index:5;background:#ffffff22;color:#fff;font-size:20px;padding:8px 14px;border-radius:12px}
+  .cp-row{display:flex;align-items:center;gap:10px;justify-content:center}
+  .cp-label{opacity:.7;width:26px;text-align:right;font-weight:700}
+  .cp-list{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+  .cp-btn{font-size:24px;line-height:1;padding:7px 10px;border-radius:10px;background:#ffffff14;border:2px solid transparent}
+  .cp-btn.sel{border-color:#ffd166;background:#ffd16633}
+  .cp-name{width:92px;background:#ffffff14;border:2px solid #ffffff22;border-radius:10px;color:#fff;padding:8px 10px;font-size:15px;font-family:inherit}
+  .cp-name:focus{outline:none;border-color:#4ecdc4}
+  .cp-name::placeholder{color:#ffffff55}
+  button.ghost{background:#ffffff22;color:#fff;font-size:16px;padding:10px 22px}
+  .rank-list{display:flex;flex-direction:column;gap:6px;width:min(480px,86vw);max-height:50vh;overflow-y:auto}
+  .rank-row{display:flex;gap:12px;align-items:baseline;background:#ffffff10;border-radius:10px;padding:8px 14px;font-size:16px;text-align:left}
+  .rank-row .rk{width:24px;text-align:right;opacity:.7;font-weight:700}
+  .rank-row.top .rk{color:#ffd166;opacity:1}
+  .rank-row .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rank-row .md{font-size:12px;opacity:.6}
+  .rank-row .sc{font-weight:700;color:#ffd166;font-variant-numeric:tabular-nums}
+  .rank-row .dt{font-size:12px;opacity:.5}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="menu" class="screen">
+  <h1>☁️ 허밍 클라우드</h1>
+  <p class="sub">허밍의 <b>음정 변화</b>로 구름을 갈아타는 게임!<br>
+  <b>허밍하는 동안만 앞으로 가요 (침묵 = 정지)<br>
+  도→미처럼 음을 올려 허밍하면 구름 한 칸 ↑ · 음을 내리면 한 칸 ↓</b><br>
+  크게 도약하면(도→솔) 여러 칸을 한 번에! 절대음감 필요 없이 아무 음에서나 시작하면 돼요<br><br>
+  허밍하는 동안 구름이 나를 태우고 날아가요 — 하지만 구름은 타는 동안 서서히 흩어지니,<br>
+  다음 구름이 다가오면 ↑↓ 표시만큼 <b>음을 도약해서 폭신하게 갈아타세요!</b><br>
+  듀엣은 두 사람이 마이크 하나로(1P 저음 · 2P 고음), 화음을 내면 하모니 게이지가 차서 보너스가 터집니다 ✨</p>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div class="cp-row"><span class="cp-label">1P</span><input id="name0" class="cp-name" maxlength="8" placeholder="이름"><div id="pick0" class="cp-list"></div></div>
+    <div class="cp-row"><span class="cp-label">2P</span><input id="name1" class="cp-name" maxlength="8" placeholder="이름"><div id="pick1" class="cp-list"></div></div>
+  </div>
+  <div style="display:flex;gap:16px">
+    <button id="btnSolo">솔로</button>
+    <button id="btnDuet" class="alt">듀엣</button>
+    <button id="btnRank" class="ghost">🏆 랭킹</button>
+  </div>
+  <p class="tip">솔로는 캘리브레이션 없이 바로 시작! · 마우스/터치 드래그로도 조작됩니다(치트)</p>
+</div>
+
+<div id="calib" class="screen hidden">
+  <h2 id="calibTitle"></h2>
+  <p id="calibDesc" class="sub"></p>
+  <div class="note-live" id="calibNote">—</div>
+  <div class="bar"><i id="calibBar"></i></div>
+  <p class="tip">소리를 2초 정도 유지하면 자동으로 넘어가요 · 허밍이나 휘파람도 OK</p>
+</div>
+
+<div id="rank" class="screen hidden">
+  <h2>🏆 랭킹</h2>
+  <p class="tip">한 판 달리고 🏠 버튼으로 나오면 점수가 기록돼요 (이 기기 기준)</p>
+  <div id="rankList" class="rank-list"></div>
+  <button id="btnRankClose" class="alt">닫기</button>
+</div>
+
+<button id="btnHome" class="iconbtn hidden" aria-label="메뉴로">🏠</button>
+
+<script src="game.js"></script>
+</body>
+</html>

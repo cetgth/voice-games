@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>보이스 게임즈</title>
+<style>
+  html,body{margin:0;min-height:100%;background:#0b1026;color:#fff;font-family:'Segoe UI',system-ui,sans-serif}
+  body{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:26px;padding:24px;box-sizing:border-box;text-align:center}
+  h1{font-size:40px;margin:0;letter-spacing:2px}
+  p{opacity:.8;line-height:1.7;max-width:520px;margin:0}
+  .games{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+  a.card{display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center;
+    width:230px;padding:28px 20px;border-radius:20px;background:#ffffff10;border:2px solid #ffffff22;
+    color:#fff;text-decoration:none;transition:transform .12s,border-color .12s}
+  a.card:hover{transform:translateY(-4px);border-color:#ffd166}
+  .emoji{font-size:52px}
+  .name{font-size:22px;font-weight:700}
+  .desc{font-size:14px;opacity:.7;line-height:1.5}
+  .tip{font-size:13px;opacity:.55}
+</style>
+</head>
+<body>
+  <h1>🎙️ 보이스 게임즈</h1>
+  <p>목소리로 조종하는 미니 게임들. 마이크 권한을 허용해 주세요 — 폰에서도 됩니다!</p>
+  <div class="games">
+    <a class="card" href="./voice-runner/">
+      <span class="emoji">🎤</span>
+      <span class="name">듀엣 러너</span>
+      <span class="desc">음높이로 점프하고 웅크리는 러너.<br>둘이서 화음 내면 장애물 폭파!</span>
+    </a>
+    <a class="card" href="./cloud-hummer/">
+      <span class="emoji">☁️</span>
+      <span class="name">허밍 클라우드</span>
+      <span class="desc">허밍하면 구름이 나를 태우고 날아요.<br>음을 도약해서 다음 구름으로 갈아타기!</span>
+    </a>
+  </div>
+  <p class="tip">캘리브레이션 때 조용한 곳에서 하면 잘 잡혀요 · 허밍이나 휘파람 모두 OK</p>
+</body>
+</html>
