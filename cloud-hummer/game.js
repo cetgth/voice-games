@@ -8,6 +8,7 @@ const CFG = {
   levels: 5,          // 구름 층 수
   hopSemis: 2,        // 기준음보다 이만큼(반음) 높거나 낮게 내면 한 칸 이동 — 방향만 판정, 폭은 상관없음
   refHold: 0.45,      // 이 시간(초) 안에 이어 낸 음만 직전 음과 비교해 도약 — 더 쉬고 내면 첫음은 기준음일 뿐
+  hopCooldown: 0.6,   // 도약 후 이 시간(초) 동안 추가 도약 무시 — 한 제스처로 두 번 뛰는 것 방지
   coast: 2.5,         // 허밍을 멈춰도 이 시정수(초)로 관성 활강 — 톡톡 끊어 불러도 OK
   cloudFresh: 7,      // 같은 구름을 오래 타면 이 시간(초)에 걸쳐 지쳐서 느려짐 — 갈아타면 다시 쌩쌩
   hopEvery: 0.75,     // 다음 구름이 도착하는 간격(초) — 이 리듬으로 계속 갈아탄다
@@ -132,7 +133,7 @@ function updateVoice(v, det, now){
       const dtv = Math.min(0.05, Math.max(0, now - v.lastVoiced));
       v.ref += (v.note - v.ref)*Math.min(1, dtv/2);   // 순항 중 미세한 흔들림은 기준음이 천천히 흡수
     }
-    v.lastNote = v.note;
+    if(v.rms > CFG.rmsGate*1.5) v.lastNote = v.note;   // 잦아드는 꼬리 음은 기억하지 않음 — 다음 비교 기준 오염 방지
     v.freq = det.freq; v.lastVoiced = now;
   }
   v.active = (now - v.lastVoiced) < CFG.voiceHold;
@@ -165,7 +166,7 @@ function buildPlayers(){
   for(const p of players){
     p.voice=makeVoice(); p.y=0; p.prevY=0; p.vy=0; p.landT=-9; p.settled=true; p.riding=false; p.r=16; p.level=2;
     p.det=[55,1500]; p.analyser=null; p.ctrlActive=false; p.x=0; p.airT=0; p.rideT=0; p.rideSeg=null;
-    p.phraseId=-1; p.gestureBase=2; p.nextDiff=0;
+    p.phraseId=-1; p.gestureBase=2; p.nextDiff=0; p.hopCd=0;
   }
 }
 
@@ -249,7 +250,7 @@ function startRun(){
   players.forEach((p,i)=>{
     p.voice = makeVoice();
     p.level = 2; p.vy = 0; p.x = W*0.28; p.airT = 0; p.rideT = 0; p.riding = true; p.rideSeg = null;
-    p.phraseId = -1; p.gestureBase = 2;
+    p.phraseId = -1; p.gestureBase = 2; p.hopCd = 0;
     p.y = levelY(ls[i], p.level); p.prevY = p.y;
     world.terrain[i] = [{x: p.x-90, w: 300, level:2, ridden:true}];   // 출발 구름
     ensureTerrain(i);
@@ -345,15 +346,19 @@ function update(dt){
   players.forEach((p,i)=>{
     const lane = ls[i];
     const v = p.voice;
-    if(!overrides[i] && v.active && v.ref !== null && v.rms > CFG.rmsGate*1.5){
-      // 방향만 맞으면 무조건 성공: 올리면 위 구름으로, 내리면 아래 구름으로 — 폭·칸수 무관하게 바로 도약
+    p.hopCd = Math.max(0, p.hopCd - dt);
+    if(!overrides[i] && v.active && v.ref !== null && v.rms > CFG.rmsGate*1.5 && p.hopCd <= 0){
+      // 방향만 맞으면 성공: 올리면 위 구름으로, 내리면 아래 구름으로
       const semis = v.note - v.ref;
       const dir = semis >= CFG.hopSemis ? 1 : (semis <= -CFG.hopSemis ? -1 : 0);
       if(dir !== 0){
         v.ref = v.note;
         const nxt = world.terrain[i].filter(s=>!s.ridden && s!==p.rideSeg).sort((a,b)=>a.x-b.x)[0];
-        // 다음 구름이 사정거리 안일 때만, 한 번에 딱 한 칸씩 도약
-        if(nxt && nxt.x < p.x + 240 && Math.sign(nxt.level - p.level) === dir) hop(p, dir);
+        // 사정거리 안 + 한 번에 한 칸 + 도약 후 쿨다운(한 제스처로 두 번 뛰는 것 방지)
+        if(nxt && nxt.x < p.x + 240 && Math.sign(nxt.level - p.level) === dir){
+          hop(p, dir);
+          p.hopCd = CFG.hopCooldown;
+        }
       }
     }
     p.x = W*0.28;
