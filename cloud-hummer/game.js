@@ -275,15 +275,12 @@ function hop(p, dir){
     world.particles.push({x:p.x+(Math.random()-0.5)*24, y:p.y+14, vx:(Math.random()-0.5)*80, vy:20+Math.random()*40,
       life:0.5, max:0.5, hue:0, sat:0, lum:92, size:3+Math.random()*3});
 }
-// 다음 계단 층: 직전에서 1~2칸 오르내림 (1칸이 더 흔함)
+// 다음 구름 층: 항상 딱 한 칸 위 또는 아래 — 음 한 번 바꾸면 한 칸
 function pickNextLevel(i){
   const last = world.lastLevel[i];
-  const jump = Math.random() < 0.7 ? 1 : 2;
   const dir = Math.random() < 0.5 ? -1 : 1;
-  let lv = last + dir*jump;
-  if(lv < 0 || lv >= CFG.levels) lv = last - dir*jump;
-  lv = clamp(lv, 0, CFG.levels-1);
-  if(lv === last) lv = clamp(last + (last < CFG.levels/2 ? 1 : -1), 0, CFG.levels-1);
+  let lv = last + dir;
+  if(lv < 0 || lv >= CFG.levels) lv = last - dir;
   world.lastLevel[i] = lv;
   return lv;
 }
@@ -355,8 +352,8 @@ function update(dt){
       if(dir !== 0){
         v.ref = v.note;
         const nxt = world.terrain[i].filter(s=>!s.ridden && s!==p.rideSeg).sort((a,b)=>a.x-b.x)[0];
-        // 다음 구름이 사정거리 안일 때만 도약 — 너무 일찍 뛰어서 공중에 오래 떠 있는 것 방지
-        if(nxt && nxt.x < p.x + 240 && Math.sign(nxt.level - p.level) === dir) hop(p, nxt.level - p.level);
+        // 다음 구름이 사정거리 안일 때만, 한 번에 딱 한 칸씩 도약
+        if(nxt && nxt.x < p.x + 240 && Math.sign(nxt.level - p.level) === dir) hop(p, dir);
       }
     }
     p.x = W*0.28;
