@@ -6,8 +6,11 @@ const CFG = {
   voiceHold: 0.25,    // 소리가 잠깐 끊겨도 이 시간(초)만큼은 유지로 간주
   smoothing: 0.35,    // 음정 스무딩 (0~1, 클수록 즉각 반응)
   levels: 5,          // 구름 층 수
-  hopSemis: 2,        // 허밍 음을 이만큼(반음) 올리거나 내리면 구름 한 칸 이동 — 큰 도약은 여러 칸
-  rideLife: 3.6,      // 구름 하나를 탈 수 있는 시간(초) — 다 타면 흩어져서 갈아타야 함
+  hopSemis: 2,        // 이만큼(반음) 음이 변하면 도약 발동
+  semisPerLevel: 3.5, // 도약 폭 — 이 간격(반음)마다 한 칸씩 (도→미=1칸, 도→솔=2칸, 옥타브=3칸)
+  refHold: 1.2,       // 숨 쉬느라 끊겨도 이 시간(초) 안에 다시 내면 직전 음과 비교해 도약 판정
+  coast: 2.5,         // 허밍을 멈춰도 이 시정수(초)로 관성 활강 — 톡톡 끊어 불러도 OK
+  cloudFresh: 7,      // 같은 구름을 오래 타면 이 시간(초)에 걸쳐 지쳐서 느려짐 — 갈아타면 다시 쌩쌩
   startSpeed: 240, maxSpeed: 560,   // 속도는 거리에 비례해 서서히 상승
   harmonyCents: 40,   // 화음 판정 허용 오차(센트, 반음=100)
   harmonyFill: 30, harmonyDrain: 14, // 하모니 게이지 초당 증감
@@ -102,13 +105,15 @@ function detectPitch(analyser, minF, maxF){
 }
 
 // ===================== 보이스 상태 (상대 음정 추적) =====================
-function makeVoice(){ return {freq:-1, rms:0, active:false, lastVoiced:-1e9, note:0, ref:null, pend:null}; }
+function makeVoice(){ return {freq:-1, rms:0, active:false, lastVoiced:-1e9, note:0, ref:null, pend:null, lastNote:null}; }
 function updateVoice(v, det, now){
   v.rms = det.rms || 0;
   if(det.freq > 0){
     const note = 69 + 12*Math.log2(det.freq/440);   // 반음 단위 연속값
     if(!v.active || v.ref === null){
-      v.note = note; v.ref = note; v.pend = null;   // 새로 소리 시작 → 기준음 설정
+      // "도… (숨) …미"처럼 끊어 불러도 직전 음을 기준으로 삼아 도약을 인식
+      v.ref = (now - v.lastVoiced < CFG.refHold && v.lastNote != null) ? v.lastNote : note;
+      v.note = note; v.pend = null;
     }else if(Math.abs(note - v.note) > 7){
       // 옥타브 오검출 의심 — 두 프레임 연속 비슷하면 진짜 도약으로 인정
       if(v.pend !== null && Math.abs(note - v.pend) < 2){ v.note = note; v.pend = null; }
@@ -117,6 +122,7 @@ function updateVoice(v, det, now){
       v.note += (note - v.note)*CFG.smoothing;
       v.pend = null;
     }
+    v.lastNote = v.note;
     v.freq = det.freq; v.lastVoiced = now;
   }
   v.active = (now - v.lastVoiced) < CFG.voiceHold;
@@ -147,7 +153,7 @@ function buildPlayers(){
        {name:getName(1)+' · 고음', emoji:chosen[1], hue:190}];
   for(const p of players){
     p.voice=makeVoice(); p.y=0; p.prevY=0; p.vy=0; p.landT=-9; p.settled=true; p.riding=false; p.r=16; p.level=2;
-    p.det=[55,1500]; p.analyser=null; p.ctrlActive=false; p.x=0; p.airT=0; p.rideSeg=null;
+    p.det=[55,1500]; p.analyser=null; p.ctrlActive=false; p.x=0; p.airT=0; p.rideT=0; p.rideSeg=null;
   }
 }
 
@@ -230,7 +236,7 @@ function startRun(){
   const ls = lanes();
   players.forEach((p,i)=>{
     p.voice = makeVoice();
-    p.level = 2; p.vy = 0; p.x = W*0.28; p.airT = 0; p.riding = true; p.rideSeg = null;
+    p.level = 2; p.vy = 0; p.x = W*0.28; p.airT = 0; p.rideT = 0; p.riding = true; p.rideSeg = null;
     p.y = levelY(ls[i], p.level); p.prevY = p.y;
     world.terrain[i] = [{x: p.x-90, w: 300, level:2, ridden:true}];   // 출발 구름
     ensureTerrain(i);
@@ -305,8 +311,11 @@ function update(dt){
   });
 
   // --- 전진 스로틀: 소리 내는 사람 수에 비례, 모두 침묵이면 정지 ---
+  // 짧게 허밍해도 관성으로 미끄러진다 — 계속 부를 필요 없이 톡톡 밀어주면 됨
   const singing = players.reduce((n,p)=>n+(p.ctrlActive?1:0), 0);
-  world.throttle += (singing/players.length - world.throttle)*Math.min(1, dt*6);
+  const thrTarget = singing/players.length;
+  if(thrTarget > world.throttle) world.throttle += (thrTarget - world.throttle)*Math.min(1, dt*6);
+  else world.throttle *= Math.exp(-dt/CFG.coast);
   const spd = world.speed * world.throttle;
 
   // --- 음정 점프 감지 & 구름 이동 (스프링으로 폭신하게 안착) ---
@@ -315,26 +324,22 @@ function update(dt){
     const v = p.voice;
     if(!overrides[i] && v.active && v.ref !== null){
       const d = v.note - v.ref;
-      if(d >= CFG.hopSemis){ hop(p, 1); v.ref = v.note; }        // 음을 올리면 위 구름으로
-      else if(d <= -CFG.hopSemis){ hop(p, -1); v.ref = v.note; } // 내리면 아래 구름으로
+      if(Math.abs(d) >= CFG.hopSemis){
+        // 도약 폭에 비례해 여러 칸: 도→미=1칸, 도→솔=2칸, 옥타브=3칸
+        const steps = Math.sign(d) * Math.max(1, Math.round(Math.abs(d)/CFG.semisPerLevel));
+        hop(p, steps);
+        v.ref = v.note;
+      }
     }
     p.x = W*0.28;
     const seg = segAt(i, p.x);
     p.riding = !!(seg && seg.level === p.level);   // 발밑 구름과 높이가 맞으면 탑승 중
     if(p.riding){
       p.airT = 0;
+      if(p.rideSeg !== seg) p.rideT = 0;   // 새 구름으로 갈아타면 다시 쌩쌩
+      p.rideT += dt;
       if(!seg.ridden){ seg.ridden = true; world.score += 10; }   // 새 구름으로 갈아타기 성공 +10
       p.rideSeg = seg;
-      // 타는 동안 구름이 서서히 닳는다 — 다 흩어지기 전에 갈아타야 함
-      seg.life = (seg.life==null ? 1 : seg.life) - dt/Math.max(2, CFG.rideLife - world.dist*0.0004);
-      if(seg.life <= 0){
-        for(let k=0;k<12;k++)
-          world.particles.push({x:seg.x+Math.random()*seg.w, y:p.y+16+(Math.random()-0.5)*10,
-            vx:(Math.random()-0.5)*120, vy:20+Math.random()*60,
-            life:0.6, max:0.6, hue:0, sat:0, lum:92, size:3+Math.random()*4});
-        world.terrain[i] = world.terrain[i].filter(s=>s!==seg);
-        p.rideSeg = null; p.riding = false;
-      }
     } else { p.airT += dt; p.rideSeg = null; }
 
     const target = levelY(lane, p.level) + (p.riding ? Math.sin(tNow*2.5 + i*2)*3 : 0);  // 탑승 중엔 둥실둥실
@@ -358,8 +363,11 @@ function update(dt){
         life:0.6, max:0.6, hue:p.hue + (p.level/(CFG.levels-1))*140, size:3.5+Math.random()*3});
   });
 
-  // 구름을 타고 있어야 온전한 속도 — 공중에 오래 떠 있을수록 느려진다 (최저 25%)
-  const rideAvg = players.reduce((a,p)=>a+(p.riding?1:Math.max(0.25, 1-1.2*p.airT)),0)/players.length;
+  // 같은 구름을 오래 타면 구름이 지쳐 느려지고(갈아타면 회복), 공중에 오래 떠 있어도 느려진다
+  const rideAvg = players.reduce((a,p)=>{
+    if(p.riding) return a + Math.max(0.35, 1 - 0.65*p.rideT/CFG.cloudFresh);
+    return a + Math.max(0.25, 1 - 1.2*p.airT);
+  },0)/players.length;
 
   // --- 전진: 구름을 타고 있을 때 온전한 속도, 공중에선 점점 느려짐 ---
   world.speed = Math.min(CFG.maxSpeed, CFG.startSpeed + world.dist*0.025);
@@ -474,11 +482,11 @@ function draw(){
     for(const s of world.terrain[i]){
       if(s.x > W + 60 || s.x + s.w < -60) continue;
       const grow = clamp((tNow - (s.born||-9))/0.5, 0, 1);
-      const life = s.life==null ? 1 : Math.max(0, s.life);
-      const effW = s.w*(0.35 + 0.65*grow)*(0.45 + 0.55*life);   // 닳을수록 작아지고 옅어짐
+      const tired = (s === p.rideSeg) ? Math.max(0.55, 1 - 0.45*p.rideT/CFG.cloudFresh) : 1;  // 오래 타면 살짝 옅어짐
+      const effW = s.w*(0.35 + 0.65*grow);
       const effX = s.x + (s.w - effW)/2;
       const y = (s === p.rideSeg) ? p.y + 16 : levelY(lane, s.level)+14;  // 타는 구름은 나와 함께 출렁
-      ctx.globalAlpha = (0.35 + 0.57*grow)*(0.35 + 0.65*life);
+      ctx.globalAlpha = (0.35 + 0.57*grow)*tired;
       ctx.fillStyle = '#ffffff';
       drawCloud(effX, y, effW);
       ctx.globalAlpha = 1;
@@ -524,6 +532,15 @@ function draw(){
       ctx.textAlign='center'; ctx.textBaseline='alphabetic';
       ctx.fillText(noteName(p.voice.freq), p.x, p.y-30);
     }
+    // 피치 게이지: 음을 올리거나 내리면 차오르고, 끝까지 차면 도약
+    if(p.ctrlActive && p.voice.ref !== null){
+      const d = clamp((p.voice.note - p.voice.ref)/CFG.hopSemis, -1, 1);
+      ctx.fillStyle = '#ffffff2e';
+      ctx.fillRect(p.x+28, p.y-22, 5, 44);
+      ctx.fillStyle = '#ffd166';
+      if(d >= 0) ctx.fillRect(p.x+28, p.y - d*22, 5, d*22);
+      else       ctx.fillRect(p.x+28, p.y, 5, -d*22);
+    }
   });
 
   // HUD
@@ -546,8 +563,8 @@ function draw(){
     ctx.globalAlpha = clamp((7-world.t)/1.5, 0, 1)*0.8;
     ctx.fillStyle='#fff'; ctx.font='18px sans-serif'; ctx.textAlign='center';
     const hint = mode==='solo'
-      ? '🎵 허밍하면 구름이 나를 태우고 날아가요 · 구름이 흩어지기 전에 ↑↓만큼 도약해서 갈아타기!'
-      : '🎵 각자 구름을 타고 허밍! 흩어지기 전에 ↑↓만큼 도약해 갈아타기 · 화음 = 게이지 ✨';
+      ? '🎵 톡톡 허밍하면 관성으로 쭉! 도→미처럼 끊어 불러도 도약돼요 · ↑↓만큼 도약해 갈아타기'
+      : '🎵 둘이 톡톡 허밍! 구름이 지치기 전에 ↑↓만큼 도약해 갈아타기 · 화음 = 게이지 ✨';
     ctx.fillText(hint, W/2, H-16);
     ctx.globalAlpha = 1;
   }
