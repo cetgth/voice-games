@@ -8,7 +8,7 @@ const CFG = {
   levels: 5,          // 구름 층 수
   hopSemis: 2,        // 이만큼(반음) 음이 변하면 도약 발동
   semisPerLevel: 3.5, // 도약 폭 — 이 간격(반음)마다 한 칸씩 (도→미=1칸, 도→솔=2칸, 옥타브=3칸)
-  refHold: 1.2,       // 숨 쉬느라 끊겨도 이 시간(초) 안에 다시 내면 직전 음과 비교해 도약 판정
+  refHold: 0.45,      // 이 시간(초) 안에 이어 낸 음만 직전 음과 비교해 도약 — 더 쉬고 내면 첫음은 기준음일 뿐
   coast: 2.5,         // 허밍을 멈춰도 이 시정수(초)로 관성 활강 — 톡톡 끊어 불러도 OK
   cloudFresh: 7,      // 같은 구름을 오래 타면 이 시간(초)에 걸쳐 지쳐서 느려짐 — 갈아타면 다시 쌩쌩
   hopEvery: 0.75,     // 다음 구름이 도착하는 간격(초) — 이 리듬으로 계속 갈아탄다
@@ -106,15 +106,17 @@ function detectPitch(analyser, minF, maxF){
 }
 
 // ===================== 보이스 상태 (상대 음정 추적) =====================
-function makeVoice(){ return {freq:-1, rms:0, active:false, lastVoiced:-1e9, note:0, ref:null, pend:null, lastNote:null}; }
+function makeVoice(){ return {freq:-1, rms:0, active:false, lastVoiced:-1e9, note:0, ref:null, pend:null, lastNote:null, fresh:false, onsetT:0}; }
 function updateVoice(v, det, now){
   v.rms = det.rms || 0;
   if(det.freq > 0){
     const note = 69 + 12*Math.log2(det.freq/440);   // 반음 단위 연속값
     if(!v.active || v.ref === null){
-      // "도… (숨) …미"처럼 끊어 불러도 직전 음을 기준으로 삼아 도약을 인식
-      v.ref = (now - v.lastVoiced < CFG.refHold && v.lastNote != null) ? v.lastNote : note;
+      // 짧게 끊은 "도-미"는 직전 음 기준으로 도약, 한숨 쉬고 낸 첫음은 기준음만 설정(도약 안 함)
+      const cont = (now - v.lastVoiced < CFG.refHold && v.lastNote != null);
+      v.ref = cont ? v.lastNote : note;
       v.note = note; v.pend = null;
+      v.fresh = !cont; v.onsetT = now;
     }else if(Math.abs(note - v.note) > 7){
       // 옥타브 오검출 의심 — 두 프레임 연속 비슷하면 진짜 도약으로 인정
       if(v.pend !== null && Math.abs(note - v.pend) < 2){ v.note = note; v.pend = null; }
@@ -122,6 +124,13 @@ function updateVoice(v, det, now){
     }else{
       v.note += (note - v.note)*CFG.smoothing;
       v.pend = null;
+    }
+    if(v.fresh){
+      if(now - v.onsetT < 0.18) v.ref = v.note;   // 첫음이 자리 잡는 동안엔 기준음이 따라가 오발동 방지
+      else v.fresh = false;
+    }else if(Math.abs(v.note - v.ref) < 1){
+      const dtv = Math.min(0.05, Math.max(0, now - v.lastVoiced));
+      v.ref += (v.note - v.ref)*Math.min(1, dtv/2);   // 순항 중 미세한 흔들림은 기준음이 천천히 흡수
     }
     v.lastNote = v.note;
     v.freq = det.freq; v.lastVoiced = now;
