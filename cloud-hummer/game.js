@@ -106,7 +106,7 @@ function detectPitch(analyser, minF, maxF){
 }
 
 // ===================== 보이스 상태 (상대 음정 추적) =====================
-function makeVoice(){ return {freq:-1, rms:0, active:false, lastVoiced:-1e9, note:0, ref:null, pend:null, lastNote:null, fresh:false, onsetT:0}; }
+function makeVoice(){ return {freq:-1, rms:0, active:false, lastVoiced:-1e9, note:0, ref:null, pend:null, lastNote:null, fresh:false, onsetT:0, phraseId:0}; }
 function updateVoice(v, det, now){
   v.rms = det.rms || 0;
   if(det.freq > 0){
@@ -117,6 +117,7 @@ function updateVoice(v, det, now){
       v.ref = cont ? v.lastNote : note;
       v.note = note; v.pend = null;
       v.fresh = !cont; v.onsetT = now;
+      v.phraseId++;   // 새 프레이즈 — 시작 높이를 기준으로 삼는다
     }else if(Math.abs(note - v.note) > 7){
       // 옥타브 오검출 의심 — 두 프레임 연속 비슷하면 진짜 도약으로 인정
       if(v.pend !== null && Math.abs(note - v.pend) < 2){ v.note = note; v.pend = null; }
@@ -164,6 +165,7 @@ function buildPlayers(){
   for(const p of players){
     p.voice=makeVoice(); p.y=0; p.prevY=0; p.vy=0; p.landT=-9; p.settled=true; p.riding=false; p.r=16; p.level=2;
     p.det=[55,1500]; p.analyser=null; p.ctrlActive=false; p.x=0; p.airT=0; p.rideT=0; p.rideSeg=null;
+    p.phraseId=-1; p.gestureBase=2; p.nextDiff=0;
   }
 }
 
@@ -247,6 +249,7 @@ function startRun(){
   players.forEach((p,i)=>{
     p.voice = makeVoice();
     p.level = 2; p.vy = 0; p.x = W*0.28; p.airT = 0; p.rideT = 0; p.riding = true; p.rideSeg = null;
+    p.phraseId = -1; p.gestureBase = 2;
     p.y = levelY(ls[i], p.level); p.prevY = p.y;
     world.terrain[i] = [{x: p.x-90, w: 300, level:2, ridden:true}];   // 출발 구름
     ensureTerrain(i);
@@ -346,17 +349,18 @@ function update(dt){
     const lane = ls[i];
     const v = p.voice;
     if(!overrides[i] && v.active && v.ref !== null){
-      const d = v.note - v.ref;
-      if(Math.abs(d) >= CFG.hopSemis){
-        // 도약 폭에 비례해 여러 칸: 도→미=1칸, 도→솔=2칸, 옥타브=3칸
-        const steps = Math.sign(d) * Math.max(1, Math.round(Math.abs(d)/CFG.semisPerLevel));
-        hop(p, steps);
-        v.ref = v.note;
-      }
+      // 프레이즈 시작음 대비 얼마나 올렸/내렸나가 그대로 층 오프셋이 된다 (내리면 되돌아옴)
+      if(p.phraseId !== v.phraseId){ p.phraseId = v.phraseId; p.gestureBase = p.level; }
+      const semis = v.note - v.ref;
+      let target = p.gestureBase;
+      if(Math.abs(semis) >= CFG.hopSemis)
+        target = clamp(p.gestureBase + Math.sign(semis)*Math.max(1, Math.round(Math.abs(semis)/CFG.semisPerLevel)), 0, CFG.levels-1);
+      if(target !== p.level) hop(p, target - p.level);
     }
     p.x = W*0.28;
     const seg = segAt(i, p.x, p.level);
-    p.riding = !!(seg && seg.level === p.level);   // 발밑 구름과 높이가 맞으면 탑승 중
+    const onY = Math.abs(p.y - levelY(lane, p.level)) < 26;      // 실제로 그 높이에 도착해야 탑승 — 스쳐 지나가는 오탑승 방지
+    p.riding = !!(seg && seg.level === p.level && onY);
     if(p.riding){
       p.airT = 0;
       if(p.rideSeg !== seg) p.rideT = 0;   // 새 구름으로 갈아타면 다시 쌩쌩
@@ -524,6 +528,7 @@ function draw(){
     }
     // 다음(대기 중) 구름의 상대 높이 안내 화살표 — 깜빡이며 목표를 알려준다
     const nxt = world.terrain[i].filter(s=>!s.ridden && s!==p.rideSeg).sort((a,b)=>a.x-b.x)[0];
+    p.nextDiff = nxt ? nxt.level - p.level : 0;
     if(nxt){
       const diff = nxt.level - p.level;
       if(diff !== 0){
@@ -565,14 +570,23 @@ function draw(){
       ctx.textAlign='center'; ctx.textBaseline='alphabetic';
       ctx.fillText(noteName(p.voice.freq), p.x, p.y-30);
     }
-    // 피치 게이지: 음을 올리거나 내리면 차오르고, 끝까지 차면 도약
+    // 피치 사다리: 금색 점(내 음의 변화량)을 초록 칸(다음 구름 높이)까지 밀면 도약
     if(p.ctrlActive && p.voice.ref !== null){
-      const d = clamp((p.voice.note - p.voice.ref)/CFG.hopSemis, -1, 1);
-      ctx.fillStyle = '#ffffff2e';
-      ctx.fillRect(p.x+28, p.y-22, 5, 44);
+      const gx = p.x + 32, step = 26;
+      ctx.strokeStyle = '#ffffff26'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(gx, p.y - step*2.3); ctx.lineTo(gx, p.y + step*2.3); ctx.stroke();
+      ctx.lineWidth = 1; ctx.strokeStyle = '#ffffff40';
+      for(let L=-2; L<=2; L++){
+        ctx.beginPath(); ctx.moveTo(gx-5, p.y - L*step); ctx.lineTo(gx+5, p.y - L*step); ctx.stroke();
+      }
+      const tgt = clamp(p.nextDiff, -2, 2);
+      if(tgt !== 0){
+        ctx.fillStyle = 'rgba(120,220,140,0.55)';
+        ctx.fillRect(gx-7, p.y - tgt*step - 7, 14, 14);
+      }
+      const dl = clamp((p.voice.note - p.voice.ref)/CFG.semisPerLevel, -2.3, 2.3);
       ctx.fillStyle = '#ffd166';
-      if(d >= 0) ctx.fillRect(p.x+28, p.y - d*22, 5, d*22);
-      else       ctx.fillRect(p.x+28, p.y, 5, -d*22);
+      ctx.beginPath(); ctx.arc(gx, p.y - dl*step, 5, 0, 6.29); ctx.fill();
     }
   });
 
@@ -596,8 +610,8 @@ function draw(){
     ctx.globalAlpha = clamp((7-world.t)/1.5, 0, 1)*0.8;
     ctx.fillStyle='#fff'; ctx.font='18px sans-serif'; ctx.textAlign='center';
     const hint = mode==='solo'
-      ? '🎵 다음 구름이 앞에서 기다려요! ↑↓만큼 음을 도약해서 갈아타기 — 몇 번이든 재도전 OK'
-      : '🎵 다음 구름이 기다려요! 각자 ↑↓만큼 음 도약해 갈아타기 · 화음 = 게이지 ✨';
+      ? '🎵 캐릭터 옆 금색 점을 초록 칸까지! 그만큼 음을 올리거나 내리면 도약해서 갈아타요'
+      : '🎵 금색 점을 초록 칸까지 음으로 밀기! 각자 갈아타기 · 화음 = 게이지 ✨';
     ctx.fillText(hint, W/2, H-16);
     ctx.globalAlpha = 1;
   }
