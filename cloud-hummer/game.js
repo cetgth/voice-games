@@ -6,7 +6,7 @@ const CFG = {
   voiceHold: 0.25,    // 소리가 잠깐 끊겨도 이 시간(초)만큼은 유지로 간주
   smoothing: 0.35,    // 음정 스무딩 (0~1, 클수록 즉각 반응)
   levels: 5,          // 구름 층 수
-  hopSemis: 2,        // 기준음보다 이만큼(반음) 높거나 낮게 내면 한 칸 이동 — 방향만 판정, 폭은 상관없음
+  hopSemis: 3.5,      // 기준음보다 이만큼(반음) 이상 확실히 벌려야 도약 — 순항 중 잔흔들림으로는 안 넘어감
   refHold: 0.45,      // 이 시간(초) 안에 이어 낸 음만 직전 음과 비교해 도약 — 더 쉬고 내면 첫음은 기준음일 뿐
   hopCooldown: 0.6,   // 도약 후 이 시간(초) 동안 추가 도약 무시 — 한 제스처로 두 번 뛰는 것 방지
   coast: 2.5,         // 허밍을 멈춰도 이 시정수(초)로 관성 활강 — 톡톡 끊어 불러도 OK
@@ -364,7 +364,9 @@ function update(dt){
         v.ref = v.note;
         const nxt = world.terrain[i].filter(s=>!s.ridden && s!==p.rideSeg).sort((a,b)=>a.x-b.x)[0];
         // 방향이 맞으면 "예약"만 — 새 구름이 발밑에 들어올 때까지 지금 구름에서 내리지 않는다
-        if(nxt && nxt.x < p.x + 240 && Math.sign(nxt.level - p.level) === dir && !p.jumpTo){
+        // (드물게 같은 높이의 구름이 기다리는 경우엔 아무 방향 도약이든 탑승 처리)
+        if(nxt && nxt.x < p.x + 240 && !p.jumpTo &&
+           (Math.sign(nxt.level - p.level) === dir || nxt.level === p.level)){
           p.jumpTo = nxt;
           p.hopCd = CFG.hopCooldown;
         }
@@ -422,8 +424,8 @@ function update(dt){
       if(s === p.rideSeg) continue;   // 타고 있는 구름은 나를 태운 채 화면에 고정 — 배경만 흘러간다
       s.x -= dx;
       if(!s.ridden){
-        if(s === p.jumpTo || s.level === p.level){
-          // 예약됐거나 내 높이와 같은 구름은 발밑으로 스르륵 들어온다
+        if(s === p.jumpTo){
+          // 도약으로 예약된 구름만 발밑으로 들어온다 — 도약 없이는 절대 못 갈아탐
           if(s.x > p.x - s.w/2) s.x = Math.max(p.x - s.w/2, s.x - 900*dt);
         }else if(s.x < p.x + 70){
           s.x = Math.min(p.x + 70, s.x + 500*dt);   // 그 외에는 앞자리에서 대기 — 놓쳐도 재도전
