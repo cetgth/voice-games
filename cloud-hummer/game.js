@@ -166,7 +166,7 @@ function buildPlayers(){
   for(const p of players){
     p.voice=makeVoice(); p.y=0; p.prevY=0; p.vy=0; p.landT=-9; p.settled=true; p.riding=false; p.r=16; p.level=2;
     p.det=[55,1500]; p.analyser=null; p.ctrlActive=false; p.x=0; p.airT=0; p.rideT=0; p.rideSeg=null;
-    p.phraseId=-1; p.gestureBase=2; p.nextDiff=0; p.hopCd=0; p.jumpTo=null;
+    p.phraseId=-1; p.gestureBase=2; p.nextDiff=0; p.hopCd=0; p.jumpTo=null; p.glow=0;
   }
 }
 
@@ -250,7 +250,7 @@ function startRun(){
   players.forEach((p,i)=>{
     p.voice = makeVoice();
     p.level = 2; p.vy = 0; p.x = W*0.28; p.airT = 0; p.rideT = 0; p.riding = true; p.rideSeg = null;
-    p.phraseId = -1; p.gestureBase = 2; p.hopCd = 0; p.jumpTo = null;
+    p.phraseId = -1; p.gestureBase = 2; p.hopCd = 0; p.jumpTo = null; p.glow = 0;
     p.y = levelY(ls[i], p.level); p.prevY = p.y;
     world.terrain[i] = [{x: p.x-90, w: 300, level:2, ridden:true}];   // 출발 구름
     ensureTerrain(i);
@@ -374,6 +374,9 @@ function update(dt){
     const seg = segAt(i, p.x, p.level);
     const onY = Math.abs(p.y - levelY(lane, p.level)) < 26;      // 실제로 그 높이에 도착해야 탑승 — 스쳐 지나가는 오탑승 방지
     p.riding = !!(seg && seg.level === p.level && onY);
+    // 허밍하면 구름의 흰색이 차오르고, 조용하면 서서히 빠진다
+    const glowT = p.ctrlActive ? 1 : 0;
+    p.glow += (glowT - p.glow)*Math.min(1, dt*(p.ctrlActive ? 3.5 : 2));
     if(p.riding){
       p.airT = 0;
       if(p.rideSeg !== seg) p.rideT = 0;   // 새 구름으로 갈아타면 다시 쌩쌩
@@ -534,9 +537,22 @@ function draw(){
       const effW = s.w*(0.35 + 0.65*grow);
       const effX = s.x + (s.w - effW)/2;
       const y = (s === p.rideSeg) ? p.y + 16 : levelY(lane, s.level)+14;  // 타는 구름은 나와 함께 출렁
-      ctx.globalAlpha = (0.35 + 0.57*grow)*tired;
-      ctx.fillStyle = '#ffffff';
-      drawCloud(effX, y, effW);
+      ctx.globalAlpha = (0.45 + 0.5*grow)*tired;
+      if(s === p.rideSeg){
+        ctx.fillStyle = 'rgb(150,158,180)';           // 회색 바탕
+        drawCloud(effX, y, effW);
+        if(p.glow > 0.02){
+          // 허밍하는 동안 왼쪽에서 오른쪽으로 흰색이 차오른다
+          ctx.save();
+          ctx.beginPath(); ctx.rect(effX - 26, y - 26, (effW + 52)*p.glow, 64); ctx.clip();
+          ctx.fillStyle = '#ffffff';
+          drawCloud(effX, y, effW);
+          ctx.restore();
+        }
+      }else{
+        ctx.fillStyle = 'rgb(197,202,214)';           // 대기 구름은 연회색
+        drawCloud(effX, y, effW);
+      }
       ctx.globalAlpha = 1;
     }
     // 다음(대기 중) 구름의 상대 높이 안내 화살표 — 깜빡이며 목표를 알려준다
